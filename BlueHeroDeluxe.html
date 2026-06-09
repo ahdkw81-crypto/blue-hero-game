@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ar">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Blue Hero Deluxe - Advanced</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body, html {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #03030d;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+            touch-action: none;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        #ui-layer {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            right: 20px;
+            color: #fff;
+            font-size: 18px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            z-index: 5;
+        }
+        .ui-item {
+            text-shadow: 0 0 10px #00f0ff;
+            background: rgba(255, 255, 255, 0.05);
+            padding: 8px 15px;
+            border-radius: 15px;
+            border: 1px solid rgba(0, 240, 255, 0.2);
+        }
+        #level-display {
+            text-shadow: 0 0 10px #ff0055;
+            border-color: rgba(255, 0, 85, 0.2);
+        }
+        #start-screen {
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(3, 3, 13, 0.9);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+            transition: opacity 0.4s;
+        }
+        h1 {
+            font-size: 38px;
+            color: #00f0ff;
+            text-shadow: 0 0 20px #00f0ff;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        p {
+            color: #8a99ad;
+            margin-bottom: 30px;
+            font-size: 15px;
+            text-align: center;
+            padding: 0 20px;
+            max-width: 400px;
+            line-height: 1.6;
+        }
+        .btn {
+            padding: 15px 45px;
+            font-size: 18px;
+            font-weight: bold;
+            color: #fff;
+            background: linear-gradient(45deg, #0055ff, #00f0ff);
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 0 20px #00f0ff;
+            outline: none;
+        }
+        .btn:active {
+            transform: scale(0.95);
+        }
+        /* إشعار الانتقال لمرحلة جديدة */
+        #level-up-alert {
+            position: absolute;
+            top: 30%;
+            left: 50%;
+            transform: translate(-50%, -50%) scale(0.5);
+            color: #fff;
+            font-size: 40px;
+            font-weight: bold;
+            text-shadow: 0 0 20px #ffea00;
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            z-index: 4;
+        }
+        #level-up-alert.show {
+            opacity: 1;
+            transform: translate(-50%, -50%) scale(1);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-layer">
+        <div class="ui-item">الذهب الكلي: <span id="score">0</span></div>
+        <div class="ui-item">العملات للمرحلة القادمة: <span id="coins-needed">5</span></div>
+        <div class="ui-item" id="level-display">المرحلة: <span id="level">1</span></div>
+    </div>
+
+    <div id="level-up-alert">المرحلة التالية التالية! ⚡</div>
+
+    <div id="start-screen">
+        <h1 id="title">Blue Hero Deluxe</h1>
+        <p id="sub-title">اجمع الذهب للتقدم للمراحل التالية وفك الحصار! احذر فالوحوش تزداد سرعة وشراسة مع كل مرحلة!</p>
+        <button class="btn" id="start-btn" onclick="startGame()">ابدأ التحدي</button>
+    </div>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const scoreEl = document.getElementById('score');
+        const coinsNeededEl = document.getElementById('coins-needed');
+        const levelEl = document.getElementById('level');
+        const startScreen = document.getElementById('start-screen');
+        const startBtn = document.getElementById('start-btn');
+        const titleEl = document.getElementById('title');
+        const subtitleEl = document.getElementById('sub-title');
+        const levelUpAlert = document.getElementById('level-up-alert');
+
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        let gameActive = false;
+        let totalCoins = 0;
+        let coinsInCurrentLevel = 0;
+        let currentLevel = 1;
+        const coinsPerLevel = 5; // عدد العملات المطلوبة للانتقال لكل مرحلة
+
+        let audioCtx = null;
+        let bgOscillator = null;
+        let bgInterval = null;
+
+        // كائن البطل الأزرق
+        const hero = {
+            x: 0, y: 0,
+            size: 22,
+            targetX: 0, targetY: 0,
+            speed: 0.18,
+            draw() {
+                ctx.save();
+                ctx.shadowBlur = 25;
+                ctx.shadowColor = '#00f0ff';
+                let gradient = ctx.createRadialGradient(this.x, this.y, 2, this.x, this.y, this.size);
+                gradient.addColorStop(0, '#ffffff');
+                gradient.addColorStop(0.4, '#00f0ff');
+                gradient.addColorStop(1, '#0033aa');
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        };
+
+        // كائن العملة الذهبية
+        const coin = {
+            x: 0, y: 0,
+            size: 12,
+            pulse: 0,
+            spawn() {
+                // توليد العملة بعيداً عن حواف الشاشة تماماً
+                this.x = Math.random() * (canvas.width - 60) + 30;
+                this.y = Math.random() * (canvas.height - 60) + 30;
+            },
+            draw() {
+                this.pulse += 0.08;
+                ctx.save();
+                ctx.shadowBlur = 20 + Math.sin(this.pulse) * 5;
+                ctx.shadowColor = '#ffea00';
+                
+                let gradient = ctx.createRadialGradient(this.x, this.y, 1, this.x, this.y, this.size);
+                gradient.addColorStop(0, '#ffffff');
+                gradient.addColorStop(0.3, '#ffea00');
+                gradient.addColorStop(1, '#b38600');
+                
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size + Math.sin(this.pulse) * 2, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        };
+
+        // مصفوفة الوحوش الحمراء
+        let enemies = [];
+
+        class Enemy {
+            constructor(isNewSpawn = false) {
+                this.size = Math.random() * 12 + 14 + (currentLevel * 1.5); // حجم الوحوش يكبر قليلاً مع المراحل
+                
+                // تحديد مكان الظهور من خارج الشاشة
+                if (Math.random() > 0.5) {
+                    this.x = Math.random() > 0.5 ? -this.size : canvas.width + this.size;
+                    this.y = Math.random() * canvas.height;
+                } else {
+                    this.x = Math.random() * canvas.width;
+                    this.y = Math.random() > 0.5 ? -this.size : canvas.height + this.size;
+                }
+                
+                // معادلة زيادة السرعة بناءً على رقم المرحلة الحالية (صعوبة تصاعدية)
+                let baseSpeed = Math.random() * 1.2 + 1.2;
+                let levelBonus = currentLevel * 0.4; 
+                this.speed = baseSpeed + levelBonus;
+                
+                this.pulseSpeed = Math.random() * 0.05 + 0.03;
+                this.pulse = Math.random() * 10;
+            }
+
+            update() {
+                const dx = hero.x - this.x;
+                const dy = hero.y - this.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+                
+                if (dist > 0) {
+                    this.x += (dx / dist) * this.speed;
+                    this.y += (dy / dist) * this.speed;
+                }
+                this.pulse += this.pulseSpeed;
+            }
+
+            draw() {
+                ctx.save();
+                let glow = this.size + Math.sin(this.pulse) * 6;
+                ctx.shadowBlur = glow;
+                ctx.shadowColor = '#ff0044';
+
+                let gradient = ctx.createRadialGradient(this.x, this.y, 2, this.x, this.y, this.size);
+                gradient.addColorStop(0, '#ffffff');
+                gradient.addColorStop(0.2, '#ff0044');
+                gradient.addColorStop(1, '#550005');
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        // تهيئة وتحديث نظام الصوت
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (bgOscillator) return;
+
+            try {
+                bgOscillator = audioCtx.createOscillator();
+                let gainNode = audioCtx.createGain();
+                bgOscillator.type = 'sawtooth'; 
+                
+                // التردد الأساسي يتصاعد تدريجياً حسب رقم المرحلة لزيادة حدة الموسيقى!
+                let baseFreq = 55 + (currentLevel * 5);
+                bgOscillator.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+                
+                gainNode.gain.setValueAtTime(0.08, audioCtx.currentTime);
+                bgOscillator.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                bgOscillator.start();
+                
+                // إيقاع يتسارع تلقائياً حسب رتم المرحلة الحالية
+                let pace = Math.max(300, 700 - (currentLevel * 50));
+                clearInterval(bgInterval);
+                bgInterval = setInterval(() => {
+                    if(gameActive && bgOscillator) {
+                        let step = 55 + (currentLevel * 5);
+                        let melody = [step, step * 1.2, step * 1.1, step * 1.3];
+                        let note = melody[Math.floor(Math.random() * melody.length)];
+                        bgOscillator.frequency.setValueAtTime(note, audioCtx.currentTime);
+                    }
+                }, pace);
+            } catch(e) { console.log(e); }
+        }
+
+        function stopAudio() {
+            if (bgOscillator) {
+                try { bgOscillator.stop(); } catch(e){}
+                bgOscillator = null;
+            }
+            clearInterval(bgInterval);
+        }
+
+        // صوت التقاط العملة
+        function playCoinSound() {
+            if (!audioCtx) return;
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(587.33, audioCtx.currentTime); // نغمة مرتفعة مبهجة D5
+            osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.15); // تصاعد سريع A5
+            gain.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.15);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        // صوت الانتقال لمرحلة أعلى
+        function playLevelUpSound() {
+            if (!audioCtx) return;
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'triangle';
+            osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+            osc.frequency.setValueAtTime(554.37, audioCtx.currentTime + 0.1);
+            osc.frequency.setValueAtTime(659.25, audioCtx.currentTime + 0.2);
+            osc.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.4);
+            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.4);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.4);
+        }
+
+        function playGameOverSound() {
+            if (!audioCtx) return;
+            let osc = audioCtx.createOscillator();
+            let gain = audioCtx.createGain();
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(180, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.7);
+            gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.01, audioCtx.currentTime + 0.7);
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.7);
+        }
+
+        // التحكم بالسحب واللمس
+        function updateTarget(x, y) {
+            hero.targetX = x;
+            hero.targetY = y;
+        }
+        window.addEventListener('mousemove', (e) => { if(gameActive) updateTarget(e.clientX, e.clientY); });
+        window.addEventListener('touchmove', (e) => {
+            if(gameActive && e.touches.length > 0) {
+                updateTarget(e.touches[0].clientX, e.touches[0].clientY);
+            }
+        }, { passive: true });
+
+        // بدء اللعبة وإعداد المتغيرات المبدئية
+        function startGame() {
+            currentLevel = 1;
+            totalCoins = 0;
+            coinsInCurrentLevel = 0;
+            
+            scoreEl.innerText = totalCoins;
+            coinsNeededEl.innerText = coinsPerLevel - coinsInCurrentLevel;
+            levelEl.innerText = currentLevel;
+
+            startScreen.style.opacity = '0';
+            setTimeout(() => { startScreen.style.display = 'none'; }, 400);
+
+            hero.x = canvas.width / 2;
+            hero.y = canvas.height / 2;
+            hero.targetX = hero.x;
+            hero.targetY = hero.y;
+            
+            coin.spawn();
+            buildEnemiesList();
+
+            gameActive = true;
+            initAudio();
+            animate();
+        }
+
+        // بناء قائمة الوحوش بناء على رقم المرحلة الحالية
+        function buildEnemiesList() {
+            enemies = [];
+            // تزداد أعداد الوحوش الأساسية مع تقدم المراحل
+            let totalEnemiesToSpawn = 3 + currentLevel; 
+            for(let i = 0; i < totalEnemiesToSpawn; i++) {
+                enemies.push(new Enemy());
+            }
+        }
+
+        // آلية الانتقال للمرحلة التالية (الفوز بالمرحلة)
+        function nextLevel() {
+            currentLevel++;
+            coinsInCurrentLevel = 0;
+            levelEl.innerText = currentLevel;
+            coinsNeededEl.innerText = coinsPerLevel;
+            
+            playLevelUpSound();
+            
+            // إعادة ضبط وتحديث وتيرة نغمات الموسيقى الخلفية
+            stopAudio();
+            initAudio();
+
+            // عرض تأثير نصي حركي على الشاشة للانتقال للمرحلة الجديدة
+            levelUpAlert.innerText = `المرحلة ${currentLevel} ⚡`;
+            levelUpAlert.classList.add('show');
+            setTimeout(() => { levelUpAlert.classList.remove('show'); }, 1200);
+
+            // إعادة بناء جيل الوحوش الجديد بالسرعات والأعداد المحدثة
+            buildEnemiesList();
+            coin.spawn();
+        }
+
+        // انتهاء اللعبة بالكامل عند الاصطدام
+        function gameOver() {
+            gameActive = false;
+            stopAudio();
+            playGameOverSound();
+            
+            titleEl.innerText = "سحقتك الوحوش!";
+            subtitleEl.innerText = `وصلت للمرحلة: ${currentLevel} \n وجمعت إجمالي ذهب: ${totalCoins}`;
+            startBtn.innerText = "إعادة التحدي والمقاومة";
+            
+            startScreen.style.display = 'flex';
+            setTimeout(() => { startScreen.style.opacity = '1'; }, 10);
+        }
+
+        // المحرك الرئيسي والحلقة التكرارية للرسم
+        function animate() {
+            if (!gameActive) return;
+
+            // تأثير غباش الحركة (Motion Blur) الممتاز لتعميق الرؤية الليلية المستمرة
+            ctx.fillStyle = 'rgba(3, 3, 13, 0.28)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // تحريك ورسم الذهب
+            coin.draw();
+
+            // تحريك البطل بسلاسة بالغة
+            hero.x += (hero.targetX - hero.x) * hero.speed;
+            hero.y += (hero.targetY - hero.y) * hero.speed;
+            hero.draw();
+
+            // التحقق من التقاط البطل للعملة الذهبية
+            let distToCoin = Math.sqrt((hero.x - coin.x)**2 + (hero.y - coin.y)**2);
+            if (distToCoin < hero.size + coin.size) {
+                totalCoins++;
+                coinsInCurrentLevel++;
+                scoreEl.innerText = totalCoins;
+                
+                playCoinSound();
+
+                if (coinsInCurrentLevel >= coinsPerLevel) {
+                    nextLevel();
+                } else {
+                    coinsNeededEl.innerText = coinsPerLevel - coinsInCurrentLevel;
+                    coin.spawn();
+                    // إضافة وحش إضافي فوري داخل المرحلة عند التقاط عملة لزيادة الحصار!
+                    enemies.push(new Enemy());
+                }
+            }
+
+            // رسم وتحريك وفحص الوحوش
+            for (let i = enemies.length - 1; i >= 0; i--) {
+                let enemy = enemies[i];
+                enemy.update();
+                enemy.draw();
+
+                // فحص الاصطدام الرياضي
+                let distToEnemy = Math.sqrt((hero.x - enemy.x)**2 + (hero.y - enemy.y)**2);
+                if (distToEnemy < hero.size + enemy.size - 4) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+    </script>
+</body>
+</html>
